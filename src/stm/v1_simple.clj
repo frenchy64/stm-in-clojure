@@ -26,10 +26,10 @@
 (defn make-transaction
   "create and return a new transaction data structure"
   []
-  { :id (swap! NEXT_TRANSACTION_ID inc),
-    :in-tx-values (atom {}),    ; map: ref -> any value
-    :written-refs (atom #{}),   ; set of refs
-    :last-seen-rev (atom {}) }) ; map: ref -> revision id
+  {:id (swap! NEXT_TRANSACTION_ID inc),
+   :in-tx-values (atom {}),    ; map: ref -> any value
+   :written-refs (atom #{}),   ; set of refs
+   :last-seen-rev (atom {}) }) ; map: ref -> revision id
 
 (defn tx-read
   "read the value of ref inside transaction tx"
@@ -51,7 +51,7 @@
   [tx ref val]
   (swap! (:in-tx-values tx) assoc ref val)
   (swap! (:written-refs tx) conj ref)
-  (if (not (contains? @(:last-seen-rev tx) ref))
+  (when-not (contains? @(:last-seen-rev tx) ref)
     ; remember first revision written
     (swap! (:last-seen-rev tx) assoc ref (:revision @ref)))
   val)
@@ -64,21 +64,21 @@
 (defn tx-commit
   "returns a boolean indicating whether tx committed successfully"
   [tx]
-  (let [validate
-        (fn [refs]
-          (every? (fn [ref]
-                    (= (:revision @ref)
-                       (@(:last-seen-rev tx) ref))) refs))]
+  (let [validate (fn [refs]
+                   (every? (fn [ref]
+                             (= (:revision @ref)
+                                (@(:last-seen-rev tx) ref)))
+                           refs))]
   
   (locking COMMIT_LOCK
     (let [in-tx-values @(:in-tx-values tx)
           success (validate (keys in-tx-values))]
-      (if success
+      (when success
         ; if validation OK, make in-tx-value of all written refs public
         (doseq [ref @(:written-refs tx)]
           (swap! ref assoc
-            :value (in-tx-values ref)
-            :revision (:id tx) )))
+                 :value (in-tx-values ref)
+                 :revision (:id tx) )))
       success))))
 
 (defn tx-run
@@ -86,8 +86,8 @@
   [tx fun]
   (let [result (binding [*current-transaction* tx] (fun))]
     (if (tx-commit tx)
-        result ; commit succeeded, return result
-        (recur (make-transaction) fun)))) ; commit failed, retry with fresh tx
+      result ; commit succeeded, return result
+      (recur (make-transaction) fun)))) ; commit failed, retry with fresh tx
 
 ;; === MC-STM public API ===
 
@@ -100,17 +100,17 @@
 ; a running transaction using 'binding', avoiding the if-test
 (defn mc-deref [ref]
   (if (nil? *current-transaction*)
-      ; reading a ref outside of a transaction
-      (:value @ref)
-      ; reading a ref inside a transaction
-      (tx-read *current-transaction* ref)))
+    ; reading a ref outside of a transaction
+    (:value @ref)
+    ; reading a ref inside a transaction
+    (tx-read *current-transaction* ref)))
 
 (defn mc-ref-set [ref newval]
   (if (nil? *current-transaction*)
-      ; writing a ref outside of a transaction
-      (throw (IllegalStateException. "can't set mc-ref outside transaction"))
-      ; writing a ref inside a transaction
-      (tx-write *current-transaction* ref newval)))
+    ; writing a ref outside of a transaction
+    (throw (IllegalStateException. "can't set mc-ref outside transaction"))
+    ; writing a ref inside a transaction
+    (tx-write *current-transaction* ref newval)))
     
 (defn mc-alter [ref fun & args]
   (mc-ref-set ref (apply fun (mc-deref ref) args)))
@@ -132,5 +132,5 @@
 
 (defn mc-sync [fun]
   (if (nil? *current-transaction*)
-      (tx-run (make-transaction) fun)
-      (fun))) ; nested dosync blocks implicitly run in the parent transaction
+    (tx-run (make-transaction) fun)
+    (fun))) ; nested dosync blocks implicitly run in the parent transaction
