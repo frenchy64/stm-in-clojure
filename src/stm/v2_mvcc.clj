@@ -1,32 +1,3 @@
-; Copyright (c) 2011-2013, Tom Van Cutsem, Vrije Universiteit Brussel
-; All rights reserved.
-;
-; Redistribution and use in source and binary forms, with or without
-; modification, are permitted provided that the following conditions are met:
-;    * Redistributions of source code must retain the above copyright
-;      notice, this list of conditions and the following disclaimer.
-;    * Redistributions in binary form must reproduce the above copyright
-;      notice, this list of conditions and the following disclaimer in the
-;      documentation and/or other materials provided with the distribution.
-;    * Neither the name of the Vrije Universiteit Brussel nor the
-;      names of its contributors may be used to endorse or promote products
-;      derived from this software without specific prior written permission.
-;
-;THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-;ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-;WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-;DISCLAIMED. IN NO EVENT SHALL VRIJE UNIVERSITEIT BRUSSEL BE LIABLE FOR ANY
-;DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-;(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-;LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-;ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-;(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-;; MC-STM: meta-circular STM in Clojure
-;; Multicore Programming
-;; (c) 2011-2013, Tom Van Cutsem
-
 ;; version 2 - multi-version concurrency control STM with history lists
 ;; Improvements over v1:
 ;; - internal consistency is now guaranteed, thanks to MVCC
@@ -38,7 +9,8 @@
 ;; - naive support for commute
 ;; - naive support for ensure (to prevent write skew)
 
-(ns stm.v2-mvcc)
+(ns stm.v2-mvcc
+  (:require [stm.RetryEx :refer [retry-ex]]))
 
 ;; === MC-STM internals ===
 
@@ -73,7 +45,7 @@
 (defn tx-retry
   "immediately abort and retry the current transaction"
   []
-  (throw (new stm.RetryEx)))
+  (throw (retry-ex)))
 
 (defn tx-read
   "read the value of ref inside transaction tx"

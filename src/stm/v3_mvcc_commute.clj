@@ -36,7 +36,8 @@
 ;;   (= severe bottleneck, but makes it easy to validate and commit)
 
 (ns stm.v3-mvcc-commute
-  (:use (clojure (set :only [union]))))
+  (:require [stm.RetryEx :refer [retry-ex retry-ex?]]
+            [clojure.set :refer [union]]))
 
 ;; === MC-STM internals ===
 
@@ -72,7 +73,7 @@
 
 (defn tx-retry []
   "immediately abort and retry the current transaction"
-  (throw (new stm.RetryEx)))
+  (throw (retry-ex)))
 
 (defn tx-read
   "read the value of ref inside transaction tx"
@@ -184,8 +185,9 @@
                   (tx-commit tx)
                   ; commit succeeded, return result
                   {:result result}) ; wrap result, as it may be nil
-                (catch stm.RetryEx e
-                  nil)))]
+                (catch Exception e
+                  (when-not (retry-ex? e)
+                    (throw e)))))]
     (if res
       (:result res)
       (recur (make-transaction) fun)))) ; tx aborted, retry with fresh tx
