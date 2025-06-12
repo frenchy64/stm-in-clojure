@@ -36,8 +36,9 @@
    or nil if no such entry exists"
   [history-chain read-pt]
   (some (fn [pair]
-          (if (and pair (<= (:write-point pair) read-pt))
-            pair)) history-chain))
+          (when (and pair (<= (:write-point pair) read-pt))
+            pair))
+        history-chain))
 
 ; history lists of mc-refs are ordered youngest to eldest
 (def most-recent first)
@@ -55,7 +56,7 @@
       (@in-tx-values mc-ref) ; return the in-tx-value
       ; search the history chain for entry with write-point <= tx's read-point
       (let [ref-entry (find-entry-before-or-on @mc-ref (:read-point tx))]
-        (if (not ref-entry)
+        (when-not ref-entry
           ; if such an entry was not found, retry
           (tx-retry))
         (let [in-tx-value (:value ref-entry)]
@@ -72,7 +73,7 @@
 ; a single global lock for all transactions to acquire on commit
 ; we use the monitor of a fresh empty Java object
 ; all threads share the same root-binding, so will acquire the same lock
-(def COMMIT_LOCK (new java.lang.Object))
+(def COMMIT_LOCK (Object.))
 
 (defn tx-commit
   "returns normally if tx committed successfully, throws RetryEx otherwise"
