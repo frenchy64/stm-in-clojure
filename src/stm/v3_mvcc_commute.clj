@@ -1,32 +1,3 @@
-; Copyright (c) 2011-2013, Tom Van Cutsem, Vrije Universiteit Brussel
-; All rights reserved.
-;
-; Redistribution and use in source and binary forms, with or without
-; modification, are permitted provided that the following conditions are met:
-;    * Redistributions of source code must retain the above copyright
-;      notice, this list of conditions and the following disclaimer.
-;    * Redistributions in binary form must reproduce the above copyright
-;      notice, this list of conditions and the following disclaimer in the
-;      documentation and/or other materials provided with the distribution.
-;    * Neither the name of the Vrije Universiteit Brussel nor the
-;      names of its contributors may be used to endorse or promote products
-;      derived from this software without specific prior written permission.
-;
-;THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-;ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-;WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-;DISCLAIMED. IN NO EVENT SHALL VRIJE UNIVERSITEIT BRUSSEL BE LIABLE FOR ANY
-;DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-;(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-;LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-;ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-;(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-;; MC-STM: meta-circular STM in Clojure
-;; Multicore Programming
-;; (c) 2011-2013, Tom Van Cutsem
-
 ;; version 3 - MVCC with commute and ensure
 ;; Improvements over v2:
 ;; - proper support for commute and ensure
@@ -54,11 +25,11 @@
 (defn make-transaction
   "create and return a new transaction data structure"
   []
-  { :read-point @GLOBAL_WRITE_POINT,
-    :in-tx-values (atom {}), ; map: ref -> any value
-    :written-refs (atom #{}), ; set of written-to refs
-    :commutes (atom {}), ; map: ref -> seq of commute-fns
-    :ensures (atom #{}) }) ; set of ensure-d refs
+  {:read-point @GLOBAL_WRITE_POINT,
+   :in-tx-values (atom {}), ; map: ref -> any value
+   :written-refs (atom #{}), ; set of written-to refs
+   :commutes (atom {}), ; map: ref -> seq of commute-fns
+   :ensures (atom #{}) }) ; set of ensure-d refs
 
 (defn find-entry-before-or-on
   "returns an entry in history-chain whose write-pt <= read-pt,
@@ -128,7 +99,7 @@
 ; a single global lock for all transactions to acquire on commit
 ; we use the monitor of a fresh empty Java object
 ; all threads share the same root-binding, so will acquire the same lock
-(def COMMIT_LOCK (new java.lang.Object))
+(def COMMIT_LOCK (Object.))
 
 (defn tx-commit
   "returns normally if tx committed successfully, throws RetryEx otherwise"
@@ -141,15 +112,15 @@
         ; validate both written-refs and ensured-refs
         ; Note: no need to validate commuted-refs
         (doseq [ref (union written-refs ensured-refs)]
-          (if (> (:write-point (most-recent @ref))
-                (:read-point tx))
+          (when (> (:write-point (most-recent @ref))
+                   (:read-point tx))
             (tx-retry)))
         
         ; if validation OK, re-apply commutes based on its most recent value
         (doseq [[commuted-ref commute-fns] commuted-refs]
           ; if a ref has been written to (by set/alter as well as commute),
           ; its in-transaction-value will be correct so we don't need to set it
-          (when (not (contains? written-refs commuted-ref))
+          (when-not (contains? written-refs commuted-ref)
             (swap! (:in-tx-values tx) assoc commuted-ref
               ; apply each commute-fn to the result of the previous commute-fn,
               ; starting with the most recent value
@@ -206,35 +177,35 @@
 
 (defn mc-deref [ref]
   (if (nil? *current-transaction*)
-      ; reading a ref outside of a transaction
-      (:value (most-recent @ref))
-      ; reading a ref inside a transaction
-      (tx-read *current-transaction* ref)))
+    ; reading a ref outside of a transaction
+    (:value (most-recent @ref))
+    ; reading a ref inside a transaction
+    (tx-read *current-transaction* ref)))
 
 (defn mc-ref-set [ref newval]
   (if (nil? *current-transaction*)
-      ; writing a ref outside of a transaction
-      (throw (IllegalStateException. "can't set mc-ref outside transaction"))
-      ; writing a ref inside a transaction
-      (tx-write *current-transaction* ref newval)))
+    ; writing a ref outside of a transaction
+    (throw (IllegalStateException. "can't set mc-ref outside transaction"))
+    ; writing a ref inside a transaction
+    (tx-write *current-transaction* ref newval)))
     
 (defn mc-alter [ref fun & args]
   (mc-ref-set ref (apply fun (mc-deref ref) args)))
 
 (defn mc-commute [ref fun & args]
-    (if (nil? *current-transaction*)
-      (throw (IllegalStateException. "can't commute mc-ref outside transaction"))
-      (tx-commute *current-transaction* ref fun args)))
+  (if (nil? *current-transaction*)
+    (throw (IllegalStateException. "can't commute mc-ref outside transaction"))
+    (tx-commute *current-transaction* ref fun args)))
 
 (defn mc-ensure [ref]
-    (if (nil? *current-transaction*)
-      (throw (IllegalStateException. "can't ensure mc-ref outside transaction"))
-      (tx-ensure *current-transaction* ref)))
+  (if (nil? *current-transaction*)
+    (throw (IllegalStateException. "can't ensure mc-ref outside transaction"))
+    (tx-ensure *current-transaction* ref)))
 
 (defmacro mc-dosync [& exps]
   `(mc-sync (fn [] ~@exps)))
 
 (defn mc-sync [fun]
   (if (nil? *current-transaction*)
-      (tx-run (make-transaction) fun)
-      (fun))) ; nested dosync blocks implicitly run in the parent transaction
+    (tx-run (make-transaction) fun)
+    (fun))) ; nested dosync blocks implicitly run in the parent transaction

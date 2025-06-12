@@ -10,7 +10,7 @@
 ;; - naive support for ensure (to prevent write skew)
 
 (ns stm.v2-mvcc
-  (:require [stm.RetryEx :refer [retry-ex]]))
+  (:require [stm.RetryEx :refer [retry-ex retry-ex?]]))
 
 ;; === MC-STM internals ===
 
@@ -27,9 +27,9 @@
 (defn make-transaction
   "create and return a new transaction data structure"
   []
-  { :read-point @GLOBAL_WRITE_POINT,
-    :in-tx-values (atom {}), ; map: ref -> any value
-    :written-refs (atom #{}) }) ; set of refs
+  {:read-point @GLOBAL_WRITE_POINT,
+   :in-tx-values (atom {}), ; map: ref -> any value
+   :written-refs (atom #{}) }) ; set of refs
 
 (defn find-entry-before-or-on
   "returns an entry in history-chain whose write-pt <= read-pt,
@@ -78,11 +78,11 @@
   "returns normally if tx committed successfully, throws RetryEx otherwise"
   [tx]
   (let [written-refs @(:written-refs tx)]
-    (when (not (empty? written-refs))
+    (when (seq written-refs)
       (locking COMMIT_LOCK
         (doseq [written-ref written-refs]
-          (if (> (:write-point (most-recent @written-ref))
-                (:read-point tx))
+          (when (> (:write-point (most-recent @written-ref))
+                   (:read-point tx))
             (tx-retry)))
 
         ; if validation OK, make in-tx-value of all written refs public    
@@ -112,8 +112,9 @@
                   (tx-commit tx)
                   ; commit succeeded, return result
                   {:result result}) ; wrap result, as it may be nil
-                (catch stm.RetryEx e
-                  nil)))]
+                (catch Exception e
+                  (when-not (retry-ex? e)
+                    (throw e)))))]
     (if res
       (:result res)
       (recur (make-transaction) fun)))) ; tx aborted, retry with fresh tx
@@ -132,17 +133,17 @@
 
 (defn mc-deref [ref]
   (if (nil? *current-transaction*)
-      ; reading a ref outside of a transaction
-      (:value (most-recent @ref))
-      ; reading a ref inside a transaction
-      (tx-read *current-transaction* ref)))
+    ; reading a ref outside of a transaction
+    (:value (most-recent @ref))
+    ; reading a ref inside a transaction
+    (tx-read *current-transaction* ref)))
 
 (defn mc-ref-set [ref newval]
   (if (nil? *current-transaction*)
-      ; writing a ref outside of a transaction
-      (throw (IllegalStateException. "can't set mc-ref outside transaction"))
-      ; writing a ref inside a transaction
-      (tx-write *current-transaction* ref newval)))
+    ; writing a ref outside of a transaction
+    (throw (IllegalStateException. "can't set mc-ref outside transaction"))
+    ; writing a ref inside a transaction
+    (tx-write *current-transaction* ref newval)))
     
 (defn mc-alter [ref fun & args]
   (mc-ref-set ref (apply fun (mc-deref ref) args)))
@@ -164,5 +165,5 @@
 
 (defn mc-sync [fun]
   (if (nil? *current-transaction*)
-      (tx-run (make-transaction) fun)
-      (fun))) ; nested dosync blocks implicitly run in the parent transaction
+    (tx-run (make-transaction) fun)
+    (fun))) ; nested dosync blocks implicitly run in the parent transaction
