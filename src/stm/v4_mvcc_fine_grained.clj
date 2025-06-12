@@ -226,7 +226,7 @@
       (tx-ensure *current-transaction* ref)))
 
 (defmacro mc-dosync [& exps]
-  `(mc-sync (fn [] ~@exps)))
+  `(mc-sync (fn [] (do ~@exps))))
 
 (defn mc-sync [fun]
   (if (nil? *current-transaction*)

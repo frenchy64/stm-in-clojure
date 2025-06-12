@@ -39,7 +39,7 @@
 ;(set! *print-level* 15)
 (def ^:dynamic *tracing* false)
 (defn- trace [& s]
-  (if *tracing*
+  (when *tracing*
     (.println System/out
       (apply str "[tx " (:id *current-transaction*) "]: " s))))
 
@@ -50,13 +50,13 @@
    that has to retry, but wants to keep its old starting time"
   ([] (make-transaction (swap! START_TICK inc)))
   ([start-tick]
-   { :read-point @GLOBAL_WRITE_POINT,
-     :in-tx-values (atom {}),  ; map: ref -> any value
-     :written-refs (atom #{}), ; set of written-to refs
-     :commutes (atom {}),      ; map: ref -> seq of commute-fns
-     :ensures (atom #{}),      ; set of ensure-d refs
-     :status (atom :RUNNING)
-     :id start-tick }))
+   {:read-point @GLOBAL_WRITE_POINT,
+    :in-tx-values (atom {}),  ; map: ref -> any value
+    :written-refs (atom #{}), ; set of written-to refs
+    :commutes (atom {}),      ; map: ref -> seq of commute-fns
+    :ensures (atom #{}),      ; set of ensure-d refs
+    :status (atom :RUNNING)
+    :id start-tick }))
 
 (defn find-entry-before-or-on
   "returns an entry in history-chain whose write-pt <= read-pt,
@@ -64,7 +64,8 @@
   [history-chain read-pt]
   (some (fn [pair]
           (if (and pair (<= (:write-point pair) read-pt))
-            pair)) history-chain))
+            pair))
+        history-chain))
 
 ; history lists of mc-refs are ordered youngest to eldest
 (defn most-recent-value [ref]
@@ -105,7 +106,7 @@
 (defn tx-read
   "read the value of ref inside transaction tx"
   [tx mc-ref]
-  (if (not (tx-active? tx)) ; check if tx was barged
+  (when-not (tx-active? tx) ; check if tx was barged
     (tx-retry tx))
   
   (let [in-tx-values (:in-tx-values tx)]
@@ -127,7 +128,7 @@
 (defn tx-write
   "write val to ref inside transaction tx"
   [tx ref val]
-  (if (not (tx-active? tx)) ; check if tx was barged
+  (when-not (tx-active? tx) ; check if tx was barged
     (tx-retry tx))
   
   ; can't set a ref after it has already been commuted
@@ -137,8 +138,8 @@
   ; try to "acquire" the ref
   (trace "trying to acquire" (:id ref))
   (locking (:lock ref)
-    (if (> (:write-point (first @(:history-list ref)))
-           (:read-point tx))
+    (when (> (:write-point (first @(:history-list ref)))
+             (:read-point tx))
       (tx-retry tx))
     
     (let [acquiring-tx @(:acquired-by ref)]
@@ -161,16 +162,16 @@
 (defn tx-ensure
   "ensure ref inside transaction tx"
   [tx ref]
-  (if (not (tx-active? tx)) ; check if tx was barged
+  (when-not (tx-active? tx) ; check if tx was barged
     (tx-retry tx))
   
   ; early validation: if the ensure-d ref was modified
   ; since this tx started, tx is already doomed
   (locking (:lock ref)
-    (if (> (:write-point (first @(:history-list ref)))
-           (:read-point tx))
+    (when (> (:write-point (first @(:history-list ref)))
+             (:read-point tx))
       (tx-retry tx))
-    (if (actively-acquired-by-other? tx ref)
+    (when (actively-acquired-by-other? tx ref)
       (tx-retry tx)))
     
   ; mark this ref as being ensure-d
@@ -179,7 +180,7 @@
 (defn tx-commute
   "commute ref inside transaction tx"
   [tx ref fun args]
-  (if (not (tx-active? tx)) ; check if tx was barged
+  (when-not (tx-active? tx) ; check if tx was barged
     (tx-retry tx))
   
   ; apply fun to the in-tx-value
@@ -219,7 +220,7 @@
   ; if the transaction is not in the RUNNING state (e.g. because it was
   ; barged), then retry. Otherwise, atomically set state to COMMITTING.
   ; This prevents other transactions from barging this transaction.
-  (if (not (compare-and-set! (:status tx) :RUNNING :COMMITTING))
+  (when-not (compare-and-set! (:status tx) :RUNNING :COMMITTING)
     (tx-retry tx))
   (trace "committing")
   
@@ -234,8 +235,8 @@
         (fn []
           ; validate ensured-refs
           (doseq [ref ensured-refs]
-            (if (> (:write-point (first @(:history-list ref)))
-                   (:read-point tx))
+            (when (> (:write-point (first @(:history-list ref)))
+                     (:read-point tx))
               (tx-retry tx)))
               
           ; perform sanity check on written-refs
@@ -245,14 +246,14 @@
           ; part of commit validation proper
           (doseq [ref written-refs]
             (trace "validating written-ref " (:id ref))
-            (if (not (= (:id @(:acquired-by ref)) (:id tx)))
+            (when-not (= (:id @(:acquired-by ref)) (:id tx))
               (throw (IllegalStateException.
                      "Abort: written-ref not acquired by committing tx")))
             (when (> (:write-point (first @(:history-list ref)))
-                   (:read-point tx))
+                     (:read-point tx))
               (trace "Abort: ref " (:id ref) " updated by other txn")
               (throw (IllegalStateException.
-                      "Abort: acquired ref updated by other transaction"))))
+                       "Abort: acquired ref updated by other transaction"))))
 
           ; if validation OK, re-apply commutes based on most recent value
           (doseq [[commuted-ref commute-fns] commuted-refs]
@@ -329,44 +330,44 @@
 ; :acquired-by refers to the most recent transaction that successfully acquired
 ; this ref. It is initialized to an inactive dummy transaction marked as COMMITTED.
 ; All reads/writes to :acquired-by should be synchronized using the :lock
-(def DUMMY_TXN {:id -1, :status (atom :COMMITTED) })
+(def DUMMY_TXN {:id -1, :status (atom :COMMITTED)})
 (defn mc-ref [val]
-    {:id (swap! REF_ID inc)
-     :lock (new Object)
-     :history-list (atom (cons { :value val
-                                 :write-point @GLOBAL_WRITE_POINT }
-                         DEFAULT_HISTORY_TAIL))
-     :acquired-by (atom DUMMY_TXN) })
+  {:id (swap! REF_ID inc)
+   :lock (Object.)
+   :history-list (atom (cons {:value val
+                              :write-point @GLOBAL_WRITE_POINT}
+                             DEFAULT_HISTORY_TAIL))
+   :acquired-by (atom DUMMY_TXN)})
 
 (defn mc-deref [ref]
   (if (nil? *current-transaction*)
-      ; reading a ref outside of a transaction
-      (most-recent-value ref)
-      ; reading a ref inside a transaction
-      (tx-read *current-transaction* ref)))
+    ; reading a ref outside of a transaction
+    (most-recent-value ref)
+    ; reading a ref inside a transaction
+    (tx-read *current-transaction* ref)))
 
 (defn mc-ref-set [ref newval]
   (if (nil? *current-transaction*)
-      ; writing a ref outside of a transaction
-      (throw (IllegalStateException. "can't set mc-ref outside transaction"))
-      ; writing a ref inside a transaction
-      (tx-write *current-transaction* ref newval)))
+    ; writing a ref outside of a transaction
+    (throw (IllegalStateException. "can't set mc-ref outside transaction"))
+    ; writing a ref inside a transaction
+    (tx-write *current-transaction* ref newval)))
     
 (defn mc-alter [ref fun & args]
   (mc-ref-set ref (apply fun (mc-deref ref) args)))
 
 (defn mc-commute [ref fun & args]
-    (if (nil? *current-transaction*)
-      (throw (IllegalStateException. "can't commute mc-ref outside transaction"))
-      (tx-commute *current-transaction* ref fun args)))
+  (if (nil? *current-transaction*)
+    (throw (IllegalStateException. "can't commute mc-ref outside transaction"))
+    (tx-commute *current-transaction* ref fun args)))
 
 (defn mc-ensure [ref]
-    (if (nil? *current-transaction*)
-      (throw (IllegalStateException. "can't ensure mc-ref outside transaction"))
-      (tx-ensure *current-transaction* ref)))
+  (if (nil? *current-transaction*)
+    (throw (IllegalStateException. "can't ensure mc-ref outside transaction"))
+    (tx-ensure *current-transaction* ref)))
 
 (defmacro mc-dosync [& exps]
-  `(mc-sync (fn [] ~@exps)))
+  `(mc-sync (fn [] (do ~@exps))))
 
 (defn mc-sync [fun]
   (if (nil? *current-transaction*)

@@ -36,8 +36,9 @@
    or nil if no such entry exists"
   [history-chain read-pt]
   (some (fn [pair]
-          (if (and pair (<= (:write-point pair) read-pt))
-            pair)) history-chain))
+          (when (and pair (<= (:write-point pair) read-pt))
+            pair))
+        history-chain))
 
 ; history lists of mc-refs are ordered youngest to eldest
 (def most-recent first)
@@ -54,7 +55,7 @@
       (@in-tx-values mc-ref) ; return the in-tx-value
       ; search the history chain for entry with write-point <= tx's read-point
       (let [ref-entry (find-entry-before-or-on @mc-ref (:read-point tx))]
-        (if (not ref-entry)
+        (when-not ref-entry
           ; if such an entry was not found, retry
           (tx-retry))
         (let [in-tx-value (:value ref-entry)]
@@ -65,7 +66,7 @@
   "write val to ref inside transaction tx"
   [tx ref val]
   ; can't set a ref after it has already been commuted
-  (if (contains? @(:commutes tx) ref)
+  (when (contains? @(:commutes tx) ref)
     (throw (IllegalStateException. "can't set after commute on " ref)))
   (swap! (:in-tx-values tx) assoc ref val)
   (swap! (:written-refs tx) conj ref)
@@ -203,7 +204,7 @@
     (tx-ensure *current-transaction* ref)))
 
 (defmacro mc-dosync [& exps]
-  `(mc-sync (fn [] ~@exps)))
+  `(mc-sync (fn [] (do ~@exps))))
 
 (defn mc-sync [fun]
   (if (nil? *current-transaction*)
