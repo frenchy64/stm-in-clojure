@@ -38,7 +38,8 @@
 ;;   transaction aborts itself if it has only been running for 1/100s.
 
 (ns stm.v5-mvcc-fine-grained-barging
-  (:use (clojure (set :only [union]))))
+  (:require [stm.RetryEx :refer [retry-ex retry-ex?]]
+            [clojure.set :only [union]]))
 
 ;; === MC-STM internals ===
 
@@ -128,7 +129,7 @@
   "immediately abort and retry the current transaction"
   [tx]
   (reset! (:status tx) :RETRY)
-  (throw (new stm.RetryEx)))
+  (throw (retry-ex)))
 
 (defn tx-read
   "read the value of ref inside transaction tx"
@@ -328,11 +329,10 @@
                   (tx-commit tx)
                   ; commit succeeded, return result
                   {:result result}) ; wrap result, as it may be nil
-                (catch stm.RetryEx e
-                  nil)
-                (catch Exception e2 ; only to aid debugging...
-                  (.printStackTrace e2)
-                  (throw e2))))]
+                (catch Exception e
+                  (when-not (retry-ex? e)
+                    (.printStackTrace e)
+                    (throw e)))))]
     (if res
       (:result res)
       ; tx aborted, retry with fresh tx (but keep same id)
