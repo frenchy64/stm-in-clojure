@@ -22,11 +22,11 @@
 (defn make-transaction
   "create and return a new transaction data structure"
   []
-  { :read-point @GLOBAL_WRITE_POINT,
-    :in-tx-values (atom {}), ; map: ref -> any value
-    :written-refs (atom #{}), ; set of written-to refs
-    :commutes (atom {}), ; map: ref -> seq of commute-fns
-    :ensures (atom #{}) }) ; set of ensure-d refs
+  {:read-point @GLOBAL_WRITE_POINT,
+   :in-tx-values (atom {}), ; map: ref -> any value
+   :written-refs (atom #{}), ; set of written-to refs
+   :commutes (atom {}), ; map: ref -> seq of commute-fns
+   :ensures (atom #{}) }) ; set of ensure-d refs
 
 (defn find-entry-before-or-on
   "returns an entry in history-chain whose write-pt <= read-pt,
@@ -34,7 +34,8 @@
   [history-chain read-pt]
   (some (fn [pair]
           (if (and pair (<= (:write-point pair) read-pt))
-            pair)) history-chain))
+            pair))
+        history-chain))
 
 ; history lists of mc-refs are ordered youngest to eldest
 (defn most-recent-value [ref]
@@ -57,7 +58,7 @@
             (locking (:lock mc-ref)
               (find-entry-before-or-on
                 @(:history-list mc-ref) (:read-point tx)))]
-        (if (not ref-entry)
+        (when-not ref-entry
           ; if such an entry was not found, retry
           (tx-retry))
         (let [in-tx-value (:value ref-entry)]
@@ -127,15 +128,15 @@
           ; validate both written-refs and ensured-refs
           ; Note: no need to validate commuted-refs
           (doseq [ref (union written-refs ensured-refs)]
-            (if (> (:write-point (first @(:history-list ref)))
-                   (:read-point tx))
+            (when (> (:write-point (first @(:history-list ref)))
+                     (:read-point tx))
               (tx-retry)))
         
           ; if validation OK, re-apply commutes based on most recent value
           (doseq [[commuted-ref commute-fns] commuted-refs]
             ; if a ref has been written to (by set/alter as well as commute),
             ; its in-transaction-value will be correct so we don't need to set it
-            (when (not (contains? written-refs commuted-ref))
+            (when-not (contains? written-refs commuted-ref)
               (swap! (:in-tx-values tx) assoc commuted-ref
                 ; apply each commute-fn to the result of the previous commute-fn,
                 ; starting with the most recent value
@@ -191,18 +192,18 @@
 ; {:value, :write-point} pairs, potentially followed by trailing nil values.
 ; Pairs are ordered latest :write-point first, oldest :write-point last
 (defn mc-ref [val]
-    {:id (swap! REF_ID inc)
-     :lock (new Object)
-     :history-list (atom (cons { :value val
-                                 :write-point @GLOBAL_WRITE_POINT }
-                         DEFAULT_HISTORY_TAIL))})
+  {:id (swap! REF_ID inc)
+   :lock (new Object)
+   :history-list (atom (cons { :value val
+                              :write-point @GLOBAL_WRITE_POINT }
+                             DEFAULT_HISTORY_TAIL))})
 
 (defn mc-deref [ref]
   (if (nil? *current-transaction*)
-      ; reading a ref outside of a transaction
-      (most-recent-value ref)
-      ; reading a ref inside a transaction
-      (tx-read *current-transaction* ref)))
+    ; reading a ref outside of a transaction
+    (most-recent-value ref)
+    ; reading a ref inside a transaction
+    (tx-read *current-transaction* ref)))
 
 (defn mc-ref-set [ref newval]
   (if (nil? *current-transaction*)
